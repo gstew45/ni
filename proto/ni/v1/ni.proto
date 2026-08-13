@@ -1,0 +1,233 @@
+syntax = "proto3";
+
+package ni.v1;
+
+// Ni — a grid-battle arena where bot processes fight over gRPC.
+//
+// The engine is the gRPC *client*; every bot is a *server* exposing this
+// service. That direction is deliberate: it makes the bot a plugin rather
+// than a participant. The engine is the sole authority on rules and state —
+// bots propose orders, the engine disposes.
+//
+// Error convention — SHRUBBERY_REQUIRED: a bot that receives a call for a
+// match it holds no state for (e.g. after a daemon restart) responds with
+// gRPC status FAILED_PRECONDITION and the message "SHRUBBERY_REQUIRED",
+// meaning: send me a NewMatch first. The engine re-sends NewMatch with the
+// current position and retries — possible only because the engine holds all
+// the truth.
+service BotService {
+  // Handshake. Bot announces name, version and supported protocol version.
+  // The engine refuses bots whose protocol version it cannot serve.
+  rpc Identify(IdentifyRequest) returns (IdentifyResponse);
+
+  // Announces a match: identity, seat, board layout and rules. Also re-sent
+  // to restore a bot that answered SHRUBBERY_REQUIRED mid-match, in which
+  // case `turn` is non-zero and the next GetOrders view carries the current
+  // position.
+  rpc NewMatch(NewMatchRequest) returns (NewMatchResponse);
+
+  // The hot path: battlefield view in, list of knight orders out. Called
+  // once per turn with the per-turn deadline attached as the gRPC deadline.
+  // The turn number is echoed request -> response, which makes the call
+  // safely retryable.
+  rpc GetOrders(GetOrdersRequest) returns (GetOrdersResponse);
+
+  // Result and reason. Somewhere to report forfeits.
+  rpc MatchEnded(MatchEndedRequest) returns (MatchEndedResponse);
+
+  // Full match log, delivered engine -> bot after the match. Exists mainly
+  // to give the trace a large payload to measure.
+  rpc SubmitReplay(SubmitReplayRequest) returns (SubmitReplayResponse);
+}
+
+message IdentifyRequest {
+  // Protocol version the engine speaks.
+  uint32 protocol_version = 1;
+}
+
+message IdentifyResponse {
+  // Human-readable bot name, e.g. "roger-the-shrubber".
+  string name = 1;
+  // Bot implementation version, free-form.
+  string version = 2;
+  // Protocol version the bot supports.
+  uint32 protocol_version = 3;
+}
+
+// A seat in the match. Both chapters follow the same doctrine, field the
+// same units, and want the same shrubbery — the armies are mirrored.
+enum Chapter {
+  CHAPTER_UNSPECIFIED = 0;
+  CHAPTER_A = 1;
+  CHAPTER_B = 2;
+}
+
+message Position {
+  uint32 x = 1;
+  uint32 y = 2;
+}
+
+message BoardLayout {
+  uint32 width = 1;
+  uint32 height = 2;
+  // Shrubbery tiles: block line of sight, grant cover to occupants.
+  repeated Position shrubbery = 3;
+}
+
+// Match configuration. The engine is the single source of these numbers;
+// bots receive them in NewMatch and must not assume defaults.
+message Rules {
+  uint32 knight_hp = 1;
+  // Maximum move distance per turn (Manhattan).
+  uint32 move_range = 2;
+  // Maximum attack distance (requires line of sight).
+  uint32 attack_range = 3;
+  uint32 attack_damage = 4;
+  // Damage subtracted when the target stands in shrubbery (cover).
+  uint32 cover_damage_reduction = 5;
+  // Match is a draw at this turn, decided on surviving HP.
+  uint32 turn_cap = 6;
+  // Per-turn thinking budget, enforced as the gRPC deadline on GetOrders.
+  uint32 turn_deadline_ms = 7;
+  // Consecutive GetOrders timeouts before the match is forfeited.
+  uint32 timeout_strike_limit = 8;
+}
+
+message NewMatchRequest {
+  string match_id = 1;
+  // Seat assignment for the receiving bot.
+  Chapter chapter = 2;
+  BoardLayout board = 3;
+  Rules rules = 4;
+  // 0 for a fresh match. Non-zero when re-sent after SHRUBBERY_REQUIRED:
+  // the match resumes at this turn.
+  uint32 turn = 5;
+}
+
+message NewMatchResponse {}
+
+message Knight {
+  // Stable unit id, e.g. "A1".."A4", "B1".."B4".
+  string unit_id = 1;
+  Chapter chapter = 2;
+  Position position = 3;
+  uint32 hp = 4;
+  uint32 move_range = 5;
+  uint32 attack_range = 6;
+  uint32 attack_damage = 7;
+}
+
+// What one chapter is shown. Already a per-bot projection, even though in
+// v1 it happens to contain the whole battlefield — fog of war later changes
+// what the engine puts in it, not the shape.
+message BattlefieldView {
+  uint32 width = 1;
+  uint32 height = 2;
+  repeated Position shrubbery = 3;
+  // All knights visible to the receiving chapter.
+  repeated Knight knights = 4;
+  Chapter to_act = 5;
+  uint32 turn = 6;
+  // Whole-match thinking budget remaining, if the rules define one.
+  // 0 when only the per-turn deadline applies.
+  uint32 time_remaining_ms = 7;
+}
+
+message GetOrdersRequest {
+  string match_id = 1;
+  // Echoed in the response; the echo is what makes GetOrders retryable.
+  uint32 turn = 2;
+  BattlefieldView view = 3;
+}
+
+// One knight's orders for the turn: optionally move, then optionally
+// attack. The engine applies orders in list order, validating each against
+// the state as mutated so far, and stops at the first illegal order.
+// Knights without an order simply don't act.
+message KnightOrder {
+  string unit_id = 1;
+  optional Position move_to = 2;
+  // unit_id of the knight to attack after moving.
+  optional string attack_target = 3;
+}
+
+message GetOrdersResponse {
+  // Must echo GetOrdersRequest.turn; the engine discards a mismatch.
+  uint32 turn = 1;
+  repeated KnightOrder orders = 2;
+}
+
+// From the receiving bot's perspective.
+enum MatchOutcome {
+  MATCH_OUTCOME_UNSPECIFIED = 0;
+  MATCH_OUTCOME_WIN = 1;
+  MATCH_OUTCOME_LOSS = 2;
+  MATCH_OUTCOME_DRAW = 3;
+}
+
+enum MatchEndReason {
+  MATCH_END_REASON_UNSPECIFIED = 0;
+  // A chapter was eliminated.
+  MATCH_END_REASON_ELIMINATION = 1;
+  // Turn cap reached; decided on surviving HP.
+  MATCH_END_REASON_TURN_CAP = 2;
+  // A bot hit the consecutive-timeout strike limit.
+  MATCH_END_REASON_FORFEIT_TIMEOUT = 3;
+  // A bot became unreachable (crash, connection refused, process exit).
+  MATCH_END_REASON_FORFEIT_CRASH = 4;
+  // Unrecoverable protocol violation (e.g. persistent garbage responses).
+  MATCH_END_REASON_FORFEIT_PROTOCOL = 5;
+}
+
+message MatchEndedRequest {
+  string match_id = 1;
+  MatchOutcome outcome = 2;
+  MatchEndReason reason = 3;
+}
+
+message MatchEndedResponse {}
+
+// How a single order fared during engine-side resolution.
+enum OrderResult {
+  ORDER_RESULT_UNSPECIFIED = 0;
+  ORDER_RESULT_APPLIED = 1;
+  // This order was illegal and stopped the turn.
+  ORDER_RESULT_ILLEGAL = 2;
+  // Not evaluated: listed after the first illegal order.
+  ORDER_RESULT_NOT_REACHED = 3;
+}
+
+message OrderOutcome {
+  KnightOrder order = 1;
+  OrderResult result = 2;
+  // Engine's reason when result != APPLIED.
+  string detail = 3;
+  // Damage actually dealt by the attack, after cover.
+  uint32 damage_dealt = 4;
+}
+
+message TurnRecord {
+  uint32 turn = 1;
+  Chapter acting = 2;
+  repeated OrderOutcome outcomes = 3;
+  // Engine-observed GetOrders latency for this turn, microseconds.
+  uint64 get_orders_latency_us = 4;
+  // True when the turn was forfeited on a missed deadline.
+  bool deadline_exceeded = 5;
+}
+
+message Replay {
+  string match_id = 1;
+  BoardLayout board = 2;
+  Rules rules = 3;
+  repeated TurnRecord turns = 4;
+  // CHAPTER_UNSPECIFIED for a draw.
+  Chapter winner = 5;
+  MatchEndReason reason = 6;
+}
+
+message SubmitReplayRequest {
+  Replay replay = 1;
+}
+
+message SubmitReplayResponse {}

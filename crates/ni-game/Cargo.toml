@@ -1,0 +1,8 @@
+[package]
+name = "ni-game"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Pure, deterministic rules engine for Ni — no gRPC, no async, no I/O"
+
+[dependencies]
