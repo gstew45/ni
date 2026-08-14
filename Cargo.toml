@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ni-proto",
+    "crates/ni-game",
+    "crates/ni-engine",
+    "crates/ni-bot",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/gstew45/ni"
+
+[workspace.dependencies]
+ni-proto = { path = "crates/ni-proto" }
+ni-game = { path = "crates/ni-game" }
+
+tonic = "0.13"
+prost = "0.13"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "time"] }
+
+tonic-build = "0.13"
+protoc-bin-vendored = "3"

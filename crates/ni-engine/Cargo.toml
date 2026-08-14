@@ -1,0 +1,12 @@
+[package]
+name = "ni-engine"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Match engine and runner for Ni — owns state, resolves orders, calls bots over gRPC"
+
+[dependencies]
+ni-proto = { workspace = true }
+ni-game = { workspace = true }
+tonic = { workspace = true }
+tokio = { workspace = true }

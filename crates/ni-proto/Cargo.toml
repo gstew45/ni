@@ -1,0 +1,14 @@
+[package]
+name = "ni-proto"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Generated gRPC types and stubs for the ni.v1 contract"
+
+[dependencies]
+tonic = { workspace = true }
+prost = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+protoc-bin-vendored = { workspace = true }
