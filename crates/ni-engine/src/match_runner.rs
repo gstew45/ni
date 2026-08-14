@@ -98,7 +98,6 @@ pub async fn run_match(
         }
     };
 
-    // TODO: Write notify_match_ended
     notify_match_ended(bot_a, &options.match_id, Chapter::A, final_status).await;
 
     notify_match_ended(bot_b, &options.match_id, Chapter::B, final_status).await;

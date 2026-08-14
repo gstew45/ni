@@ -5,4 +5,5 @@ pub mod match_runner;
 pub mod process;
 pub mod render;
 
+pub use match_runner::{run_match, RunOptions};
 pub use process::BotProcess;
