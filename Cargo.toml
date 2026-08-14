@@ -15,10 +15,19 @@ repository = "https://github.com/gstew45/ni"
 [workspace.dependencies]
 ni-proto = { path = "crates/ni-proto" }
 ni-game = { path = "crates/ni-game" }
-
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 tonic = "0.13"
 prost = "0.13"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "process", "time"] }
-
+tokio = { version = "1", features = [
+    "macros",
+    "rt-multi-thread",
+    "net",
+    "process",
+    "time",
+    "io-util",
+    "sync",
+] }
+tokio-stream = { version = "0.1", features = ["net"] }
 tonic-build = "0.13"
 protoc-bin-vendored = "3"

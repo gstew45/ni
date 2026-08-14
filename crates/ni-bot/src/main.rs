@@ -1,12 +1,39 @@
-//! `ni-bot` — the reference bot.
-//!
-//! A process exposing the `ni.v1.Bot` service: receives a battlefield
-//! view, returns orders. Untrusted by assumption; the engine validates
-//! everything it says.
-//!
-//! Implementation lands in milestone M2 — see `implementation-plan.md`.
+use std::io::Write as _;
 
-fn main() {
-    eprintln!("ni-bot: scaffolding only, nothing to run yet — see implementation-plan.md");
-    std::process::exit(2);
+use anyhow::{Context, Result};
+use clap::Parser;
+use ni_bot::ReferenceBot;
+use ni_proto::ni::v1::bot_service_server::BotServiceServer;
+use tokio::net::TcpListener;
+use tokio_stream::wrappers::TcpListenerStream;
+use tonic::transport::Server;
+
+#[derive(Parser)]
+#[command(about = "Run the Ni reference bot gRPC server")]
+struct Cli {
+    #[arg(long, default_value = "tcp://127.0.0.1:0")]
+    listen: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    let bind_address = cli
+        .listen
+        .strip_prefix("tcp://")
+        .context("M2 listen target must begin with tcp://")?;
+
+    let listener = TcpListener::bind(bind_address).await?;
+    let local_address = listener.local_addr()?;
+
+    println!("LISTENING tcp://{local_address}");
+    std::io::stdout().flush()?;
+
+    Server::builder()
+        .add_service(BotServiceServer::new(ReferenceBot::default()))
+        .serve_with_incoming(TcpListenerStream::new(listener))
+        .await?;
+
+    Ok(())
 }

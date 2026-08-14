@@ -8,5 +8,7 @@ description = "Match engine and runner for Ni — owns state, resolves orders, c
 [dependencies]
 ni-proto = { workspace = true }
 ni-game = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
 tonic = { workspace = true }
 tokio = { workspace = true }
