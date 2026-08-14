@@ -1,6 +1,6 @@
 // The authoritative M2 match loop
 
-use std::{convert::identity, time::Duration};
+use std::time::Duration;
 
 use crate::{
     convert::{battlefield_view, new_match_request, order_from_proto},
@@ -136,4 +136,61 @@ async fn identify(bot: &mut BotProcess, label: &str) -> Result<()> {
     );
 
     Ok(())
+}
+
+async fn notify_match_ended(
+    bot: &mut BotProcess,
+    match_id: &str,
+    chapter: Chapter,
+    status: MatchStatus,
+) {
+    let request = MatchEndedRequest {
+        match_id: match_id.to_string(),
+        outcome: outcome_for(status, chapter),
+        reason: reason_for(status),
+    };
+
+    if let Err(error) = bot.client.match_ended(request).await {
+        eprintln!("could not notify bot {chapter:?} that the match ended: {error}");
+    }
+}
+
+fn reason_for(status: MatchStatus) -> i32 {
+    let reason = match status {
+        MatchStatus::Winner { reason, .. } | MatchStatus::Draw { reason } => reason,
+        MatchStatus::InProgress => {
+            return MatchEndReason::Unspecified as i32;
+        }
+    };
+
+    match reason {
+        EndReason::Elimination => MatchEndReason::Elimination as i32,
+        EndReason::TurnCap => MatchEndReason::TurnCap as i32,
+    }
+}
+
+fn outcome_for(status: MatchStatus, recipient: Chapter) -> i32 {
+    match status {
+        MatchStatus::Winner { chapter, .. } if chapter == recipient => MatchOutcome::Win as i32,
+        MatchStatus::Winner { .. } => MatchOutcome::Loss as i32,
+        MatchStatus::Draw { .. } => MatchOutcome::Draw as i32,
+        MatchStatus::InProgress => MatchOutcome::Unspecified as i32,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_is_mapped_from_each_bots_perspective() {
+        let status = MatchStatus::Winner {
+            chapter: Chapter::A,
+            reason: EndReason::Elimination,
+        };
+
+        assert_eq!(outcome_for(status, Chapter::A), MatchOutcome::Win as i32);
+        assert_eq!(outcome_for(status, Chapter::B), MatchOutcome::Loss as i32);
+        assert_eq!(reason_for(status), MatchEndReason::Elimination as i32);
+    }
 }
