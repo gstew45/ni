@@ -5,6 +5,7 @@ members = [
     "crates/ni-game",
     "crates/ni-engine",
     "crates/ni-bot",
+    "crates/roger-the-shrubber",
 ]
 
 [workspace.package]
@@ -15,6 +16,7 @@ repository = "https://github.com/gstew45/ni"
 [workspace.dependencies]
 ni-proto = { path = "crates/ni-proto" }
 ni-game = { path = "crates/ni-game" }
+ni-bot = { path = "crates/ni-bot" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 tonic = "0.13"

@@ -7,6 +7,8 @@ use ni_proto::ni::v1::{
     KnightOrder as ProtoOrder, NewMatchRequest, Position as ProtoPosition, Rules as ProtoRules,
 };
 
+use crate::policy::TimeControl;
+
 pub fn chapter_to_proto(chapter: GameChapter) -> i32 {
     match chapter {
         GameChapter::A => ProtoChapter::A as i32,
@@ -32,7 +34,7 @@ pub fn board_layout(state: &MatchState) -> BoardLayout {
     }
 }
 
-pub fn rules_to_proto(state: &MatchState) -> ProtoRules {
+pub fn rules_to_proto(state: &MatchState, time: TimeControl) -> ProtoRules {
     ProtoRules {
         knight_hp: state.rules.knight_hp,
         move_range: state.rules.move_range,
@@ -40,8 +42,8 @@ pub fn rules_to_proto(state: &MatchState) -> ProtoRules {
         attack_damage: state.rules.attack_damage,
         cover_damage_reduction: state.rules.cover_damage_reduction,
         turn_cap: state.rules.turn_cap,
-        turn_deadline_ms: 0,
-        timeout_strike_limit: 0,
+        turn_deadline_ms: time.turn_deadline_ms(),
+        timeout_strike_limit: time.strike_limit,
     }
 }
 
@@ -49,13 +51,26 @@ pub fn new_match_request(
     state: &MatchState,
     match_id: &str,
     chapter: GameChapter,
+    time: TimeControl,
 ) -> NewMatchRequest {
     NewMatchRequest {
         match_id: match_id.to_string(),
         chapter: chapter_to_proto(chapter),
         board: Some(board_layout(state)),
-        rules: Some(rules_to_proto(state)),
+        rules: Some(rules_to_proto(state, time)),
         turn: 0,
+    }
+}
+
+pub fn resume_match_request(
+    state: &MatchState,
+    match_id: &str,
+    chapter: GameChapter,
+    time: TimeControl,
+) -> NewMatchRequest {
+    NewMatchRequest {
+        turn: state.turn,
+        ..new_match_request(state, match_id, chapter, time)
     }
 }
 
@@ -154,5 +169,23 @@ mod tests {
                 reason: IllegalReason::DestinationOob,
             }
         );
+    }
+
+    #[test]
+    fn a_fresh_match_starts_at_turn_zero_and_a_resume_does_not() {
+        let mut state = ni_game::standard_match(Rules::standard());
+        state.turn = 7;
+        let time = TimeControl {
+            turn_deadline: std::time::Duration::from_millis(250),
+            strike_limit: 3,
+        };
+
+        let fresh = new_match_request(&state, "m3-demo", GameChapter::A, time);
+        let resumed = resume_match_request(&state, "m3-demo", GameChapter::A, time);
+
+        assert_eq!(fresh.turn, 0);
+        assert_eq!(resumed.turn, 7);
+        assert_eq!(resumed.board, fresh.board);
+        assert_eq!(resumed.rules.unwrap().turn_deadline_ms, 250);
     }
 }

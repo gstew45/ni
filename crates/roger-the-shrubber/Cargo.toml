@@ -1,0 +1,14 @@
+[package]
+name = "roger-the-shrubber"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "A deliberately hostile Ni bot: sleeps, crashes, forgets matches, returns nonsense"
+
+[dependencies]
+ni-bot = { workspace = true }
+ni-proto = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }

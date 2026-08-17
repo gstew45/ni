@@ -4,6 +4,8 @@ use std::fmt::Write as _;
 
 use ni_game::{Chapter, EndReason, MatchState, MatchStatus, OrderOutcome, OrderResult};
 
+use crate::policy::{ForfeitReason, MatchConclusion, Strikes};
+
 pub fn render_board(state: &MatchState) -> String {
     let mut output = String::new();
     output.push_str("   ");
@@ -76,17 +78,49 @@ pub fn render_turn(
     output
 }
 
-pub fn render_result(status: MatchStatus) -> String {
-    match status {
-        MatchStatus::InProgress => "result: match still in progress".to_string(),
-        MatchStatus::Winner { chapter, reason } => format!(
+pub fn render_forfeited_turn(
+    turn: u32,
+    acting: Chapter,
+    reason: ForfeitReason,
+    detail: &str,
+    strikes: Strikes,
+    limit: u32,
+) -> String {
+    format!(
+        "turn {turn}: chapter {} forfeits the turn - {} ({detail}); strike {}/{limit}\n",
+        chapter_name(acting),
+        forfeit_name(reason),
+        strikes.count(),
+    )
+}
+
+pub fn render_result(conclusion: MatchConclusion) -> String {
+    match conclusion {
+        MatchConclusion::Decided(MatchStatus::InProgress) => {
+            "result: match strill in progress".to_string()
+        }
+        MatchConclusion::Decided(MatchStatus::Winner { chapter, reason }) => format!(
             "result: chapter {} wins by {}",
             chapter_name(chapter),
             reason_name(reason)
         ),
-        MatchStatus::Draw { reason } => {
+        MatchConclusion::Decided(MatchStatus::Draw { reason }) => {
             format!("result: draw by {}", reason_name(reason))
         }
+        MatchConclusion::Forfeit { loser, reason } => format!(
+            "result: chapter {} wins - chapter {} forfeits ({})",
+            chapter_name(loser.opponent()),
+            chapter_name(loser),
+            forfeit_name(reason)
+        ),
+    }
+}
+
+fn forfeit_name(reason: ForfeitReason) -> &'static str {
+    match reason {
+        ForfeitReason::Timeout => "missed deadline",
+        ForfeitReason::Crash => "unreachable",
+        ForfeitReason::Protocol => "broken contract",
     }
 }
 
@@ -139,5 +173,34 @@ mod tests {
         let board = render_board(&state);
         assert!(!board.contains("A1"));
         assert!(board.contains('#'));
+    }
+
+    #[test]
+    fn a_forfeited_match_reads_as_a_win_for_the_other_chapter() {
+        let text = render_result(MatchConclusion::Forfeit {
+            loser: Chapter::B,
+            reason: ForfeitReason::Timeout,
+        });
+
+        assert!(text.contains("chapter A wins"), "{text}");
+        assert!(text.contains("missed deadline"), "{text}");
+    }
+
+    #[test]
+    fn a_forfeited_turn_shows_the_strike_count() {
+        let mut strikes = Strikes::default();
+        strikes.record(ForfeitReason::Timeout);
+
+        let text = render_forfeited_turn(
+            4,
+            Chapter::A,
+            ForfeitReason::Timeout,
+            "no answer within 250ms",
+            strikes,
+            3,
+        );
+
+        assert!(text.contains("turn 4"), "{text}");
+        assert!(text.contains("strike 1/3"), "{text}");
     }
 }

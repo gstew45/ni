@@ -1,3 +1,7 @@
+pub mod server;
+
+pub use server::serve;
+
 use std::collections::{HashMap, HashSet};
 
 use ni_proto::{

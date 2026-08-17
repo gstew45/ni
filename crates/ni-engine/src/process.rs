@@ -1,6 +1,6 @@
 //! Spawn, connect to, and reap one bot process.
 
-use std::{path::Path, process::Stdio};
+use std::{ffi::OsStr, path::Path, process::Stdio, time::Duration};
 
 use anyhow::{Context, Result};
 use ni_proto::ni::v1::bot_service_client::BotServiceClient;
@@ -11,6 +11,8 @@ use tokio::{
 };
 use tonic::transport::Channel;
 
+pub const STARTUP_DEADLINE: Duration = Duration::from_secs(5);
+
 pub struct BotProcess {
     pub client: BotServiceClient<Channel>,
     endpoint: String,
@@ -20,9 +22,18 @@ pub struct BotProcess {
 
 impl BotProcess {
     pub async fn spawn(path: &Path, label: &str) -> Result<Self> {
+        Self::spawn_with_args::<&OsStr>(path, label, &[]).await
+    }
+
+    pub async fn spawn_with_args<S: AsRef<OsStr>>(
+        path: &Path,
+        label: &str,
+        extra_args: &[S],
+    ) -> Result<Self> {
         let mut child = Command::new(path)
             .arg("--listen")
             .arg("tcp://127.0.0.1:0")
+            .args(extra_args)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .kill_on_drop(true)
@@ -34,9 +45,18 @@ impl BotProcess {
 
             let mut lines = BufReader::new(stdout).lines();
 
-            let ready = lines
-                .next_line()
-                .await?
+            // tokio::time::timeout wraps any future in a deadline. This one
+            // covers the readiness line and the dial together, because both
+            // are "is this bot alive yet?".
+            let ready = tokio::time::timeout(STARTUP_DEADLINE, lines.next_line())
+                .await
+                .with_context(|| {
+                    format!(
+                        "{label} printed no readiness line within {}ms",
+                        STARTUP_DEADLINE.as_millis()
+                    )
+                })?
+                .context("failed to read bot stdout")?
                 .context("bot exited before its readiness line")?;
 
             let address = ready
@@ -44,9 +64,13 @@ impl BotProcess {
                 .context("invalid bot readiness line")?
                 .to_string();
 
-            let client = BotServiceClient::connect(format!("http://{address}"))
-                .await
-                .with_context(|| format!("failed to connect to {label} at {address}"))?;
+            let client = tokio::time::timeout(
+                STARTUP_DEADLINE,
+                BotServiceClient::connect(format!("http://{address}")),
+            )
+            .await
+            .with_context(|| format!("{label} did not accept a connection at {address}"))?
+            .with_context(|| format!("failed to connect to {label} at {address}"))?;
 
             Ok((client, address, lines))
         }
@@ -82,6 +106,13 @@ impl BotProcess {
 
     pub fn endpoint(&self) -> &str {
         &self.endpoint
+    }
+
+    pub fn exit_status(&mut self) -> Result<Option<i32>> {
+        match self.child.try_wait()? {
+            Some(status) => Ok(Some(status.code().unwrap_or(-1))),
+            None => Ok(None),
+        }
     }
 
     pub async fn shutdown(&mut self) -> Result<()> {
