@@ -27,6 +27,7 @@ use ni_proto::{
 };
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
+use tracing::{info, warn, Instrument};
 
 /// Which misbehaviours are switched on. Everything is off by default, so
 /// `roger-the-shrubber` with no flags is a (slightly dim) normal opponent.
@@ -89,7 +90,7 @@ impl Roger {
             return;
         }
 
-        eprintln!("roger: forgetting every match at turn {turn}");
+        warn!("roger: forgetting every match at turn {turn}");
         self.matches.write().await.clear();
     }
 
@@ -100,7 +101,7 @@ impl Roger {
         };
 
         if wanted && self.mischief.sleep_ms > 0 {
-            eprintln!(
+            warn!(
                 "roger: sleeping {}ms on turn {turn}",
                 self.mischief.sleep_ms
             );
@@ -110,7 +111,7 @@ impl Roger {
 
     fn maybe_crash(&self, turn: u32) {
         if self.mischief.crash_on_turn == Some(turn) {
-            eprint!("roger: dying on turn {turn}");
+            warn!("roger: dying on turn {turn}");
             // Not a panic: a panic in a handler is caught and turned into a
             // status. This kills the process mid-request, which is what a
             // real crash looks like from the engine's side of the socket.
@@ -119,29 +120,15 @@ impl Roger {
     }
 }
 
-#[tonic::async_trait]
-impl BotService for Roger {
-    async fn identify(
+impl Roger {
+    async fn handle_new_match(
         &self,
-        _request: Request<IdentifyRequest>,
-    ) -> Result<Response<IdentifyResponse>, Status> {
-        Ok(Response::new(IdentifyResponse {
-            name: "roger-the-shrubber".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            protocol_version: PROTOCOL_VERSION,
-        }))
-    }
-
-    async fn new_match(
-        &self,
-        request: Request<NewMatchRequest>,
+        request: NewMatchRequest,
     ) -> Result<Response<NewMatchResponse>, Status> {
-        let request = request.into_inner();
-
         let chapter = Chapter::try_from(request.chapter)
             .map_err(|_| Status::invalid_argument("unknown chapter"))?;
 
-        eprintln!(
+        info!(
             "roger: NewMatch {} as {chapter:?} at turn {}",
             request.match_id, request.turn
         );
@@ -151,12 +138,10 @@ impl BotService for Roger {
         Ok(Response::new(NewMatchResponse {}))
     }
 
-    async fn get_orders(
+    async fn handle_get_orders(
         &self,
-        request: Request<GetOrdersRequest>,
+        request: GetOrdersRequest,
     ) -> Result<Response<GetOrdersResponse>, Status> {
-        let request = request.into_inner();
-
         self.maybe_crash(request.turn);
         self.maybe_forget(request.turn).await;
 
@@ -185,13 +170,48 @@ impl BotService for Roger {
             orders: self.orders(&view, chapter),
         }))
     }
+}
+
+#[tonic::async_trait]
+impl BotService for Roger {
+    async fn identify(
+        &self,
+        _request: Request<IdentifyRequest>,
+    ) -> Result<Response<IdentifyResponse>, Status> {
+        Ok(Response::new(IdentifyResponse {
+            name: "roger-the-shrubber".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            protocol_version: PROTOCOL_VERSION,
+        }))
+    }
+
+    async fn new_match(
+        &self,
+        request: Request<NewMatchRequest>,
+    ) -> Result<Response<NewMatchResponse>, Status> {
+        let span = ni_telemetry::server_span("ni.v1.BotService/NewMatch", request.metadata());
+        self.handle_new_match(request.into_inner())
+            .instrument(span)
+            .await
+    }
+
+    async fn get_orders(
+        &self,
+        request: Request<GetOrdersRequest>,
+    ) -> Result<Response<GetOrdersResponse>, Status> {
+        let span = ni_telemetry::server_span("ni.v1.BotService/GetOrders", request.metadata());
+
+        self.handle_get_orders(request.into_inner())
+            .instrument(span)
+            .await
+    }
 
     async fn match_ended(
         &self,
         request: Request<MatchEndedRequest>,
     ) -> Result<Response<MatchEndedResponse>, Status> {
         let request = request.into_inner();
-        eprintln!(
+        info!(
             "roger: MatchEnded {} outcome={} reason={}",
             request.match_id, request.outcome, request.reason
         );

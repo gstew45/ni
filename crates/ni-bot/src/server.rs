@@ -2,7 +2,10 @@ use std::io::Write as _;
 
 use anyhow::{Context, Result};
 use ni_proto::ni::v1::bot_service_server::{BotService, BotServiceServer};
-use tokio::net::TcpListener;
+use tokio::{
+    net::TcpListener,
+    signal::unix::{signal, SignalKind},
+};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
@@ -22,8 +25,21 @@ where
 
     Server::builder()
         .add_service(BotServiceServer::new(service))
-        .serve_with_incoming(TcpListenerStream::new(listener))
+        .serve_with_incoming_shutdown(TcpListenerStream::new(listener), terminated())
         .await?;
 
     Ok(())
+}
+
+async fn terminated() {
+    match signal(SignalKind::terminate()) {
+        Ok(mut sigterm) => {
+            sigterm.recv().await;
+            tracing::info!("SIGTERM: draining and flushing telemetry");
+        }
+        Err(error) => {
+            tracing::warn!(%error, "cannot listen for SIGTERM; running until killed");
+            std::future::pending::<()>().await;
+        }
+    }
 }

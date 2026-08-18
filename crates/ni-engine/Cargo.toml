@@ -8,7 +8,13 @@ description = "Match engine and runner for Ni — owns state, resolves orders, c
 [dependencies]
 ni-proto = { workspace = true }
 ni-game = { workspace = true }
+ni-telemetry = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
+libc = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tonic = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }

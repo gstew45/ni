@@ -7,6 +7,8 @@ description = "Reference bot for Ni — a gRPC server that receives views and re
 
 [dependencies]
 ni-proto = { workspace = true }
+ni-telemetry = { workspace = true }
+tracing = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tonic = { workspace = true }

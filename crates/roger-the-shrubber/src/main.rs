@@ -15,9 +15,14 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let telemetry = ni_telemetry::init("roger-the-shrubber");
+
     let cli = Cli::parse();
 
-    eprintln!("roger: {:?}", cli.mischief);
+    tracing::info!(mischief = ?cli.mischief, "roger reporting for duty");
 
-    serve(&cli.listen, Roger::new(cli.mischief)).await
+    let result = serve(&cli.listen, Roger::new(cli.mischief)).await;
+
+    telemetry.shutdown();
+    result
 }

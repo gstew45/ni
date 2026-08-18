@@ -43,6 +43,17 @@ enum Command {
         #[arg(long, default_value_t = 3)]
         strike_limit: u32,
 
+        /// Append one JSON object per turn to this file.
+        #[arg(long, default_value = "ni-match.jsonl")]
+        match_log: PathBuf,
+
+        /// Write no match log at all. The replay is still built and sent.
+        #[arg(long, conflicts_with = "match_log")]
+        no_match_log: bool,
+
+        #[arg(long, default_value = "m4-demo")]
+        match_id: String,
+
         #[arg(long)]
         quiet: bool,
     },
@@ -51,7 +62,7 @@ enum Command {
 fn parse_duration(value: &str) -> std::result::Result<Duration, String> {
     let milliseconds = value
         .strip_suffix("ms")
-        .ok_or_else(|| "duration mus end in ms, for example 200ms".to_string())?
+        .ok_or_else(|| "duration must end in ms, for example 200ms".to_string())?
         .parse::<u64>()
         .map_err(|error| format!("invalid millisecond duration: {error}"))?;
 
@@ -60,6 +71,10 @@ fn parse_duration(value: &str) -> std::result::Result<Duration, String> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // First line of the program: everything after this point can be traced,
+    // and nothing before it can.
+    let telemetry = ni_telemetry::init("ni-engine");
+
     let Command::Run {
         bot_a,
         bot_b,
@@ -68,20 +83,29 @@ async fn main() -> Result<()> {
         delay,
         turn_deadline,
         strike_limit,
+        match_log,
+        no_match_log,
+        match_id,
         quiet,
     } = Cli::parse().command;
 
     let options = RunOptions {
         delay,
         quiet,
-        match_id: "m3-demo".to_string(),
+        match_id,
         time: TimeControl {
             turn_deadline,
             strike_limit,
         },
+        match_log: (!no_match_log).then_some(match_log),
     };
 
-    let conclusion = run(bot_a, bot_a_arg, bot_b, bot_b_arg, options).await?;
+    let result = run(bot_a, bot_a_arg, bot_b, bot_b_arg, options).await;
+
+    // Flush spans and logs before exiting, whatever happened to the match.
+    telemetry.shutdown();
+
+    let conclusion = result?;
 
     if let MatchConclusion::Forfeit { loser, reason } = conclusion {
         eprintln!("note: chapter {loser:?} forfeited ({reason:?})");

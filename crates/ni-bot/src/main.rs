@@ -11,7 +11,13 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    // The engine spawns this process, so it inherits the engine's
+    // OTEL_EXPORTER_OTLP_ENDPOINT — but the service name is per-binary.
+    let telemetry = ni_telemetry::init("reference-bot");
 
-    serve(&cli.listen, ReferenceBot::default()).await
+    let cli = Cli::parse();
+    let result = serve(&cli.listen, ReferenceBot::default()).await;
+
+    telemetry.shutdown();
+    result
 }

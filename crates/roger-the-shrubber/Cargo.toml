@@ -8,6 +8,8 @@ description = "A deliberately hostile Ni bot: sleeps, crashes, forgets matches, 
 [dependencies]
 ni-bot = { workspace = true }
 ni-proto = { workspace = true }
+ni-telemetry = { workspace = true }
+tracing = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }

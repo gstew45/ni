@@ -1,0 +1,16 @@
+[package]
+name = "ni-telemetry"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Shared tracing/OTLP wiring and W3C trace-context propagation for Ni"
+
+[dependencies]
+opentelemetry = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }

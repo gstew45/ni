@@ -15,6 +15,7 @@ use ni_proto::{
 };
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
+use tracing::{info, Instrument};
 
 #[derive(Clone, Copy)]
 struct MatchInfo {
@@ -25,31 +26,97 @@ struct MatchInfo {
 pub struct ReferenceBot {
     matches: RwLock<HashMap<String, MatchInfo>>,
 }
-
 #[tonic::async_trait]
 impl BotService for ReferenceBot {
     async fn identify(
         &self,
-        _request: Request<IdentifyRequest>,
+        request: Request<IdentifyRequest>,
     ) -> Result<Response<IdentifyResponse>, Status> {
-        Ok(Response::new(IdentifyResponse {
-            name: "reference-bot".to_string(),
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            protocol_version: PROTOCOL_VERSION,
-        }))
+        let span = ni_telemetry::server_span("ni.v1.BotService/Identify", request.metadata());
+
+        async {
+            info!(protocol = PROTOCOL_VERSION, "identified");
+
+            Ok(Response::new(IdentifyResponse {
+                name: "reference-bot".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                protocol_version: PROTOCOL_VERSION,
+            }))
+        }
+        .instrument(span)
+        .await
     }
 
     async fn new_match(
         &self,
         request: Request<NewMatchRequest>,
     ) -> Result<Response<NewMatchResponse>, Status> {
+        let span = ni_telemetry::server_span("ni.v1.BotService/NewMatch", request.metadata());
+        self.handle_new_match(request.into_inner())
+            .instrument(span)
+            .await
+    }
+
+    async fn get_orders(
+        &self,
+        request: Request<GetOrdersRequest>,
+    ) -> Result<Response<GetOrdersResponse>, Status> {
+        let span = ni_telemetry::server_span("ni.v1.BotService/GetOrders", request.metadata());
+        self.handle_get_orders(request.into_inner())
+            .instrument(span)
+            .await
+    }
+
+    async fn match_ended(
+        &self,
+        request: Request<MatchEndedRequest>,
+    ) -> Result<Response<MatchEndedResponse>, Status> {
+        let span = ni_telemetry::server_span("ni.v1.BotService/MatchEnded", request.metadata());
+
+        async {
+            info!("match ended");
+            Ok(Response::new(MatchEndedResponse {}))
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn submit_replay(
+        &self,
+        request: Request<SubmitReplayRequest>,
+    ) -> Result<Response<SubmitReplayResponse>, Status> {
+        let span = ni_telemetry::server_span("ni.v1.BotService/SubmitReplay", request.metadata());
+
+        async {
+            let replay = request.into_inner().replay;
+
+            info!(
+                turns = replay
+                    .as_ref()
+                    .map(|replay| replay.turns.len())
+                    .unwrap_or(0),
+                "replay received"
+            );
+
+            Ok(Response::new(SubmitReplayResponse {}))
+        }
+        .instrument(span)
+        .await
+    }
+}
+
+impl ReferenceBot {
+    async fn handle_new_match(
+        &self,
+        request: NewMatchRequest,
+    ) -> Result<Response<NewMatchResponse>, Status> {
         let NewMatchRequest {
             match_id,
             chapter,
             board,
             rules,
-            ..
-        } = request.into_inner();
+            turn,
+        } = request;
 
         if match_id.is_empty() {
             return Err(Status::invalid_argument("match_id is required"));
@@ -65,6 +132,8 @@ impl BotService for ReferenceBot {
         let _board = board.ok_or_else(|| Status::invalid_argument("board is required"))?;
         let _rules = rules.ok_or_else(|| Status::invalid_argument("rules are required"))?;
 
+        info!(%match_id, ?chapter, turn, "match announced");
+
         self.matches
             .write()
             .await
@@ -73,12 +142,10 @@ impl BotService for ReferenceBot {
         Ok(Response::new(NewMatchResponse {}))
     }
 
-    async fn get_orders(
+    async fn handle_get_orders(
         &self,
-        request: Request<GetOrdersRequest>,
+        request: GetOrdersRequest,
     ) -> Result<Response<GetOrdersResponse>, Status> {
-        let request = request.into_inner();
-
         let info = self
             .matches
             .read()
@@ -106,26 +173,14 @@ impl BotService for ReferenceBot {
             ));
         }
 
-        let orders = choose_order(&view, info.chapter).into_iter().collect();
+        let orders: Vec<KnightOrder> = choose_order(&view, info.chapter).into_iter().collect();
+
+        info!(turn = request.turn, orders = orders.len(), "orders chosen");
 
         Ok(Response::new(GetOrdersResponse {
             turn: request.turn,
             orders,
         }))
-    }
-
-    async fn match_ended(
-        &self,
-        _request: Request<MatchEndedRequest>,
-    ) -> Result<Response<MatchEndedResponse>, Status> {
-        Ok(Response::new(MatchEndedResponse {}))
-    }
-
-    async fn submit_replay(
-        &self,
-        _request: Request<SubmitReplayRequest>,
-    ) -> Result<Response<SubmitReplayResponse>, Status> {
-        Ok(Response::new(SubmitReplayResponse {}))
     }
 }
 

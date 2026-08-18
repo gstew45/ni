@@ -1,0 +1,27 @@
+name: ni-telemetry
+
+# One container: an OpenTelemetry collector wired to Tempo (traces),
+# Loki (logs), Prometheus (metrics) and Grafana (the dashboard).
+#
+#   docker compose -f deploy/telemetry/docker-compose.yml up -d
+#   open http://localhost:3000
+#
+# Ni exports over OTLP/HTTP to 4318; 4317 is the gRPC port, kept open so you
+# can switch the exporter and see the difference.
+services:
+  telemetry:
+    image: docker.io/grafana/otel-lgtm:latest
+    container_name: ni-telemetry
+    ports:
+      - "3000:3000"   # Grafana
+      - "4317:4317"   # OTLP/gRPC
+      - "4318:4318"   # OTLP/HTTP
+    environment:
+      # Keep the collector's own logs quiet unless something is wrong.
+      - ENABLE_LOGS_ALL=false
+    volumes:
+      - telemetry-data:/data
+    restart: unless-stopped
+
+volumes:
+  telemetry-data:

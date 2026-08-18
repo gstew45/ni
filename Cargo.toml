@@ -5,6 +5,7 @@ members = [
     "crates/ni-game",
     "crates/ni-engine",
     "crates/ni-bot",
+    "crates/ni-telemetry",
     "crates/roger-the-shrubber",
 ]
 
@@ -17,7 +18,9 @@ repository = "https://github.com/gstew45/ni"
 ni-proto = { path = "crates/ni-proto" }
 ni-game = { path = "crates/ni-game" }
 ni-bot = { path = "crates/ni-bot" }
+ni-telemetry = { path = "crates/ni-telemetry" }
 anyhow = "1"
+libc = "0.2"
 clap = { version = "4", features = ["derive"] }
 tonic = "0.13"
 prost = "0.13"
@@ -28,8 +31,18 @@ tokio = { version = "1", features = [
     "process",
     "time",
     "io-util",
+    "signal",
     "sync",
 ] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic-build = "0.13"
 protoc-bin-vendored = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.33"
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry-otlp = "0.32"
+opentelemetry-appender-tracing = "0.32"

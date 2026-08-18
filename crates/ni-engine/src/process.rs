@@ -12,6 +12,9 @@ use tokio::{
 use tonic::transport::Channel;
 
 pub const STARTUP_DEADLINE: Duration = Duration::from_secs(5);
+/// How long a bot gets to finish its own shutdown — which, from M4 on,
+/// includes flushing whatever spans are still sitting in its batch queue.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 pub struct BotProcess {
     pub client: BotServiceClient<Channel>,
@@ -115,13 +118,44 @@ impl BotProcess {
         }
     }
 
+    /// Ask, wait, then insist.
+    ///
+    /// M3 killed bots outright. That was fine when a bot had nothing to say
+    /// on the way out; a bot that exports telemetry has a batch queue, and
+    /// `SIGKILL` throws it away. So: `SIGTERM` first, a short grace period,
+    /// and `SIGKILL` only for a bot that ignores it.
     pub async fn shutdown(&mut self) -> Result<()> {
         if self.child.try_wait()?.is_none() {
-            self.child.kill().await?;
+            self.request_termination();
+
+            if tokio::time::timeout(SHUTDOWN_GRACE, self.child.wait())
+                .await
+                .is_err()
+            {
+                tracing::warn!(
+                    grace_ms = SHUTDOWN_GRACE.as_millis(),
+                    "bot ignored SIGTERM; killing it"
+                );
+                let _ = self.child.kill().await;
+            }
         }
 
         let _ = self.child.wait().await;
         let _ = (&mut self.stdout_task).await;
         Ok(())
+    }
+
+    /// `tokio::process::Child` can only `SIGKILL`, so the polite signal goes
+    /// through `libc`. The pid belongs to a child we spawned and have not
+    /// reaped, so it cannot have been recycled.
+    fn request_termination(&mut self) {
+        let Some(pid) = self.child.id() else {
+            return;
+        };
+
+        // SAFETY: `kill` with a pid we own and a valid signal number.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        }
     }
 }
