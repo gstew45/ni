@@ -313,13 +313,21 @@ fn print_table(rows: &[Summary]) {
 /// The only number post 6 actually argues about: how much of the median call
 /// the wire was responsible for.
 fn print_comparison(rows: &[Summary]) {
-    let cases: Vec<&str> = rows
+    // Pair the rows up *before* printing anything. Only cases measured on both
+    // transports can be compared, and a single-transport run therefore has
+    // nothing to say here — a header with no rows under it would be worse than
+    // no header at all.
+    let pairs: Vec<(&Summary, &Summary)> = rows
         .iter()
         .filter(|row| row.transport == "tcp")
-        .map(|row| row.case.as_str())
+        .filter_map(|tcp| {
+            rows.iter()
+                .find(|row| row.transport == "unix" && row.case == tcp.case)
+                .map(|unix| (tcp, unix))
+        })
         .collect();
 
-    if cases.is_empty() {
+    if pairs.is_empty() {
         return;
     }
 
@@ -330,18 +338,7 @@ fn print_comparison(rows: &[Summary]) {
     );
     println!("{}", "-".repeat(64));
 
-    for case in cases {
-        let tcp = rows
-            .iter()
-            .find(|row| row.transport == "tcp" && row.case == case);
-        let unix = rows
-            .iter()
-            .find(|row| row.transport == "unix" && row.case == case);
-
-        let (Some(tcp), Some(unix)) = (tcp, unix) else {
-            continue;
-        };
-
+    for (tcp, unix) in pairs {
         let delta = if tcp.p50_us == 0 {
             0.0
         } else {
@@ -350,7 +347,7 @@ fn print_comparison(rows: &[Summary]) {
 
         println!(
             "{:<20} {:>10} {:>10} {:>9.1}% {:>10.1}",
-            case,
+            tcp.case,
             tcp.p50_us,
             unix.p50_us,
             delta,
