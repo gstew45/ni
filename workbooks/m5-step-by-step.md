@@ -3037,13 +3037,21 @@ fn print_table(rows: &[Summary]) {
 /// The only number post 6 actually argues about: how much of the median call
 /// the wire was responsible for.
 fn print_comparison(rows: &[Summary]) {
-    let cases: Vec<&str> = rows
+    // Pair the rows up *before* printing anything. Only cases measured on both
+    // transports can be compared, and a single-transport run therefore has
+    // nothing to say here — a header with no rows under it would be worse than
+    // no header at all.
+    let pairs: Vec<(&Summary, &Summary)> = rows
         .iter()
         .filter(|row| row.transport == "tcp")
-        .map(|row| row.case.as_str())
+        .filter_map(|tcp| {
+            rows.iter()
+                .find(|row| row.transport == "unix" && row.case == tcp.case)
+                .map(|unix| (tcp, unix))
+        })
         .collect();
 
-    if cases.is_empty() {
+    if pairs.is_empty() {
         return;
     }
 
@@ -3054,18 +3062,7 @@ fn print_comparison(rows: &[Summary]) {
     );
     println!("{}", "-".repeat(64));
 
-    for case in cases {
-        let tcp = rows
-            .iter()
-            .find(|row| row.transport == "tcp" && row.case == case);
-        let unix = rows
-            .iter()
-            .find(|row| row.transport == "unix" && row.case == case);
-
-        let (Some(tcp), Some(unix)) = (tcp, unix) else {
-            continue;
-        };
-
+    for (tcp, unix) in pairs {
         let delta = if tcp.p50_us == 0 {
             0.0
         } else {
@@ -3074,7 +3071,7 @@ fn print_comparison(rows: &[Summary]) {
 
         println!(
             "{:<20} {:>10} {:>10} {:>9.1}% {:>10.1}",
-            case,
+            tcp.case,
             tcp.p50_us,
             unix.p50_us,
             delta,
@@ -3084,10 +3081,13 @@ fn print_comparison(rows: &[Summary]) {
 }
 ```
 
-`let (Some(tcp), Some(unix)) = (…) else { continue };` is a **let-else** over a
-tuple: bind both or skip this row. It is what makes `--transport unix` alone
-print a table with no comparison section rather than a panic or a table of
-misleading zeroes.
+`filter_map` over the TCP rows, looking each one's case up among the UDS rows, is
+what makes a single-transport run print a table with no comparison section rather
+than a panic or a header with nothing under it. Note the ordering: pair
+everything up, check whether anything survived, *then* print. Deciding what to
+output while you are already halfway through outputting it is how you end up with
+a dangling header — which is exactly what the first version of this function did
+when asked for `--transport tcp` on its own.
 
 ### 6.8 Add the two examples
 
