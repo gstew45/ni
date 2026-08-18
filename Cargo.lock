@@ -719,6 +719,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
+name = "ni-bench"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "hyper-util",
+ "ni-engine",
+ "ni-game",
+ "ni-proto",
+ "ni-telemetry",
+ "prost 0.13.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "ni-bot"
 version = "0.1.0"
 dependencies = [
@@ -738,6 +758,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "hyper-util",
  "libc",
  "ni-game",
  "ni-proto",
@@ -747,6 +768,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tonic",
+ "tower",
  "tracing",
 ]
 

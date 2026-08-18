@@ -7,7 +7,8 @@
 use std::{path::PathBuf, time::Duration};
 
 use ni_engine::{
-    policy::TimeControl, run_match, BotProcess, ForfeitReason, MatchConclusion, RunOptions,
+    policy::TimeControl, run_match, BotProcess, ForfeitReason, Listen, MatchConclusion, RunOptions,
+    SocketDir, Transport,
 };
 use ni_game::Chapter;
 use serde_json::Value;
@@ -34,13 +35,21 @@ fn options(deadline_ms: u64, strike_limit: u32) -> RunOptions {
     RunOptions {
         delay: Duration::ZERO,
         quiet: true,
-        match_id: "m4-test".to_string(),
+        match_id: "m5-test".to_string(),
         time: TimeControl {
             turn_deadline: Duration::from_millis(deadline_ms),
             strike_limit,
         },
         match_log: None,
+        transport: Transport::Tcp,
     }
+}
+
+/// A socket directory unique to one test, under the system temp dir so the
+/// path stays well inside the 108-byte `sun_path` limit.
+fn sockets(name: &str) -> SocketDir {
+    SocketDir::create(&std::env::temp_dir().join("ni-m5-tests"), name)
+        .expect("socket directory is created")
 }
 
 /// A log path unique to one test, so the suite can run in parallel.
@@ -61,13 +70,26 @@ fn read_entries(path: &PathBuf) -> Vec<Value> {
 /// Play `bot A = ni-bot` against a Roger carrying `flags`, and return how it
 /// ended. Panics only if the *engine* failed, which is the point.
 async fn play_against_roger(flags: &[&str], options: RunOptions) -> MatchConclusion {
-    let mut bot_a = BotProcess::spawn(&binary("ni-bot"), "bot A")
+    // Every test that does not care about the transport gets TCP, exactly as
+    // it did in M3 and M4. The transport-specific tests build their own.
+    let sockets = match options.transport {
+        Transport::Tcp => None,
+        Transport::Unix => Some(sockets(&options.match_id)),
+    };
+
+    let listen = |label: &str| match &sockets {
+        Some(dir) => Listen::Unix(dir.socket(label).expect("socket path fits")),
+        None => Listen::Tcp,
+    };
+
+    let mut bot_a = BotProcess::spawn(&binary("ni-bot"), "bot A", &listen("a"))
         .await
         .expect("reference bot starts");
 
-    let mut bot_b = BotProcess::spawn_with_args(&binary("roger-the-shrubber"), "bot B", flags)
-        .await
-        .expect("roger starts");
+    let mut bot_b =
+        BotProcess::spawn_with_args(&binary("roger-the-shrubber"), "bot B", flags, &listen("b"))
+            .await
+            .expect("roger starts");
 
     let conclusion = run_match(&mut bot_a, &mut bot_b, options).await;
 

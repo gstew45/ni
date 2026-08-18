@@ -1,6 +1,6 @@
 pub mod server;
 
-pub use server::serve;
+pub use server::{describe_peer, serve};
 
 use std::collections::{HashMap, HashSet};
 
@@ -34,8 +34,13 @@ impl BotService for ReferenceBot {
     ) -> Result<Response<IdentifyResponse>, Status> {
         let span = ni_telemetry::server_span("ni.v1.BotService/Identify", request.metadata());
 
-        async {
-            info!(protocol = PROTOCOL_VERSION, "identified");
+        // The handshake is where a bot learns who it is talking to. Over a
+        // Unix socket that is a kernel-verified fact; over TCP it is an
+        // address anybody on the host could have connected from.
+        let peer = describe_peer(&request);
+
+        async move {
+            info!(protocol = PROTOCOL_VERSION, %peer, "identified");
 
             Ok(Response::new(IdentifyResponse {
                 name: "reference-bot".to_string(),
