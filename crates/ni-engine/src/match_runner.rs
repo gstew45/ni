@@ -13,6 +13,7 @@ use crate::{
     },
     process::BotProcess,
     render::{render_board, render_forfeited_turn, render_result, render_turn},
+    transport::Transport,
 };
 use anyhow::{ensure, Result};
 use ni_game::{Chapter, MatchState, MatchStatus, Order, Rules};
@@ -40,6 +41,10 @@ pub struct RunOptions {
     pub time: TimeControl,
     /// `None` disables the JSONL file; the replay is built either way.
     pub match_log: Option<PathBuf>,
+    /// Which socket family the bots were spawned on. The loop never reads
+    /// this to make a decision — it is recorded so a measurement can be
+    /// attributed, and that is the whole of M5's effect on the match loop.
+    pub transport: Transport,
 }
 
 enum TurnOutcome {
@@ -136,7 +141,11 @@ async fn new_match(
 #[tracing::instrument(
     name = "match",
     skip_all,
-    fields(otel.name = "match", ni.match_id = %options.match_id)
+    fields(
+        otel.name = "match",
+        ni.match_id = %options.match_id,
+        ni.transport = options.transport.as_str(),
+    )
 )]
 pub async fn run_match(
     bot_a: &mut BotProcess,
@@ -152,6 +161,7 @@ pub async fn run_match(
         &options.match_id,
         &state,
         options.time,
+        options.transport.as_str(),
         options.match_log.as_deref(),
     )?;
 
@@ -160,6 +170,7 @@ pub async fn run_match(
 
     info!(
         match_id = %options.match_id,
+        transport = options.transport.as_str(),
         turn_deadline_ms = options.time.turn_deadline_ms(),
         strike_limit = options.time.strike_limit,
         "match begins"

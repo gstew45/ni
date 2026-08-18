@@ -59,6 +59,7 @@ impl MatchLog {
         match_id: &str,
         state: &MatchState,
         time: TimeControl,
+        transport: &str,
         path: Option<&Path>,
     ) -> Result<Self> {
         let mut writer = match path {
@@ -77,6 +78,7 @@ impl MatchLog {
                 ts_ms: now_ms(),
                 match_id: &match_id,
                 trace: TraceRef::current(),
+                transport,
                 turn_deadline_ms: time.turn_deadline_ms(),
                 strike_limit: time.strike_limit,
                 board_width: board.width,
@@ -205,6 +207,8 @@ enum Entry<'a> {
         match_id: &'a str,
         #[serde(flatten)]
         trace: TraceRef,
+        /// `tcp` or `unix`: which socket family carried this match.
+        transport: &'a str,
         turn_deadline_ms: u32,
         strike_limit: u32,
         board_width: u32,
@@ -356,8 +360,14 @@ mod tests {
     fn log_in(directory: &Path) -> (MatchLog, std::path::PathBuf) {
         let path = directory.join("match.jsonl");
         let state = ni_game::standard_match(Rules::standard());
-        let log =
-            MatchLog::create("m4-test", &state, TimeControl::standard(), Some(&path)).unwrap();
+        let log = MatchLog::create(
+            "m4-test",
+            &state,
+            TimeControl::standard(),
+            "tcp",
+            Some(&path),
+        )
+        .unwrap();
         (log, path)
     }
 
@@ -448,7 +458,8 @@ mod tests {
     #[test]
     fn no_path_means_no_file_but_still_a_replay() {
         let state = ni_game::standard_match(Rules::standard());
-        let mut log = MatchLog::create("m4-quiet", &state, TimeControl::standard(), None).unwrap();
+        let mut log =
+            MatchLog::create("m4-quiet", &state, TimeControl::standard(), "unix", None).unwrap();
 
         log.record_turn(TurnEvent {
             turn: 1,

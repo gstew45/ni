@@ -1,20 +1,22 @@
 [package]
-name = "ni-engine"
+name = "ni-bench"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
-description = "Match engine and runner for Ni — owns state, resolves orders, calls bots over gRPC"
+description = "Measurement harness for Ni — one service definition, two transports, four payload sizes"
+
+[dev-dependencies]
+hyper-util = { workspace = true }
+tower = { workspace = true }
 
 [dependencies]
 ni-proto = { workspace = true }
 ni-game = { workspace = true }
+ni-engine = { workspace = true }
 ni-telemetry = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
-libc = { workspace = true }
 prost = { workspace = true }
-hyper-util = { workspace = true }
-tower = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tonic = { workspace = true }

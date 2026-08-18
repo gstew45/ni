@@ -11,6 +11,8 @@ use tokio::{
 };
 use tonic::transport::Channel;
 
+use crate::transport::{dial, Listen};
+
 pub const STARTUP_DEADLINE: Duration = Duration::from_secs(5);
 /// How long a bot gets to finish its own shutdown — which, from M4 on,
 /// includes flushing whatever spans are still sitting in its batch queue.
@@ -24,18 +26,19 @@ pub struct BotProcess {
 }
 
 impl BotProcess {
-    pub async fn spawn(path: &Path, label: &str) -> Result<Self> {
-        Self::spawn_with_args::<&OsStr>(path, label, &[]).await
+    pub async fn spawn(path: &Path, label: &str, listen: &Listen) -> Result<Self> {
+        Self::spawn_with_args::<&OsStr>(path, label, &[], listen).await
     }
 
     pub async fn spawn_with_args<S: AsRef<OsStr>>(
         path: &Path,
         label: &str,
         extra_args: &[S],
+        listen: &Listen,
     ) -> Result<Self> {
         let mut child = Command::new(path)
             .arg("--listen")
-            .arg("tcp://127.0.0.1:0")
+            .arg(listen.argv())
             .args(extra_args)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -62,20 +65,20 @@ impl BotProcess {
                 .context("failed to read bot stdout")?
                 .context("bot exited before its readiness line")?;
 
-            let address = ready
-                .strip_prefix("LISTENING tcp://")
-                .context("invalid bot readiness line")?
+            // The readiness line carries the endpoint *including its scheme*,
+            // so the engine never has to remember which transport it asked
+            // for — it dials whatever the bot says it bound.
+            let endpoint = ready
+                .strip_prefix("LISTENING ")
+                .with_context(|| format!("invalid bot readiness line: {ready:?}"))?
                 .to_string();
 
-            let client = tokio::time::timeout(
-                STARTUP_DEADLINE,
-                BotServiceClient::connect(format!("http://{address}")),
-            )
-            .await
-            .with_context(|| format!("{label} did not accept a connection at {address}"))?
-            .with_context(|| format!("failed to connect to {label} at {address}"))?;
+            let client = tokio::time::timeout(STARTUP_DEADLINE, dial(&endpoint, STARTUP_DEADLINE))
+                .await
+                .with_context(|| format!("{label} did not accept a connection at {endpoint}"))?
+                .with_context(|| format!("failed to connect to {label} at {endpoint}"))?;
 
-            Ok((client, address, lines))
+            Ok((client, endpoint, lines))
         }
         .await;
 
@@ -122,8 +125,9 @@ impl BotProcess {
     ///
     /// M3 killed bots outright. That was fine when a bot had nothing to say
     /// on the way out; a bot that exports telemetry has a batch queue, and
-    /// `SIGKILL` throws it away. So: `SIGTERM` first, a short grace period,
-    /// and `SIGKILL` only for a bot that ignores it.
+    /// `SIGKILL` throws it away. From M5 there is a second reason: a bot that
+    /// is killed never unlinks its socket file, so the polite signal is what
+    /// keeps `$XDG_RUNTIME_DIR/ni` from filling up with dead names.
     pub async fn shutdown(&mut self) -> Result<()> {
         if self.child.try_wait()?.is_none() {
             self.request_termination();

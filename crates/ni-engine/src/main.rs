@@ -2,7 +2,9 @@ use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use ni_engine::{run_match, BotProcess, MatchConclusion, RunOptions, TimeControl};
+use ni_engine::{
+    run_match, BotProcess, Listen, MatchConclusion, RunOptions, SocketDir, TimeControl, Transport,
+};
 
 #[derive(Parser)]
 #[command(about = "Run authoritative Ni matches")]
@@ -51,8 +53,17 @@ enum Command {
         #[arg(long, conflicts_with = "match_log")]
         no_match_log: bool,
 
-        #[arg(long, default_value = "m4-demo")]
+        #[arg(long, default_value = "m5-demo")]
         match_id: String,
+
+        /// Socket family for the bots: `tcp` (loopback) or `unix`.
+        #[arg(long, default_value = "tcp")]
+        transport: Transport,
+
+        /// Where Unix sockets are created. Defaults to `$XDG_RUNTIME_DIR/ni`,
+        /// or `/tmp/ni-<uid>` when that is unset. Ignored for `--transport tcp`.
+        #[arg(long)]
+        socket_dir: Option<PathBuf>,
 
         #[arg(long)]
         quiet: bool,
@@ -86,6 +97,8 @@ async fn main() -> Result<()> {
         match_log,
         no_match_log,
         match_id,
+        transport,
+        socket_dir,
         quiet,
     } = Cli::parse().command;
 
@@ -98,9 +111,10 @@ async fn main() -> Result<()> {
             strike_limit,
         },
         match_log: (!no_match_log).then_some(match_log),
+        transport,
     };
 
-    let result = run(bot_a, bot_a_arg, bot_b, bot_b_arg, options).await;
+    let result = run(bot_a, bot_a_arg, bot_b, bot_b_arg, socket_dir, options).await;
 
     // Flush spans and logs before exiting, whatever happened to the match.
     telemetry.shutdown();
@@ -119,22 +133,42 @@ async fn run(
     bot_a_args: Vec<String>,
     bot_b_path: PathBuf,
     bot_b_args: Vec<String>,
+    socket_dir: Option<PathBuf>,
     options: RunOptions,
 ) -> Result<MatchConclusion> {
-    let mut bot_a = BotProcess::spawn_with_args(&bot_a_path, "bot A", &bot_a_args).await?;
-
-    let mut bot_b = match BotProcess::spawn_with_args(&bot_b_path, "bot B", &bot_b_args).await {
-        Ok(bot) => bot,
-        Err(error) => {
-            if let Err(cleanup_error) = bot_a.shutdown().await {
-                eprintln!(
-                    "could not clean up bot A after bot B failed to start: \
-                     {cleanup_error}"
-                );
-            }
-            return Err(error);
+    // Held for the whole match: dropping it removes the directory and every
+    // socket in it. `None` for TCP, where there is nothing to clean up.
+    let sockets = match options.transport {
+        Transport::Tcp => None,
+        Transport::Unix => {
+            let base = socket_dir.unwrap_or_else(SocketDir::default_base);
+            Some(SocketDir::create(&base, &options.match_id)?)
         }
     };
+
+    let listen = |label: &str| -> Result<Listen> {
+        match &sockets {
+            Some(dir) => Ok(Listen::Unix(dir.socket(label)?)),
+            None => Ok(Listen::Tcp),
+        }
+    };
+
+    let mut bot_a =
+        BotProcess::spawn_with_args(&bot_a_path, "bot A", &bot_a_args, &listen("a")?).await?;
+
+    let mut bot_b =
+        match BotProcess::spawn_with_args(&bot_b_path, "bot B", &bot_b_args, &listen("b")?).await {
+            Ok(bot) => bot,
+            Err(error) => {
+                if let Err(cleanup_error) = bot_a.shutdown().await {
+                    eprintln!(
+                        "could not clean up bot A after bot B failed to start: \
+                     {cleanup_error}"
+                    );
+                }
+                return Err(error);
+            }
+        };
 
     let match_result = run_match(&mut bot_a, &mut bot_b, options).await;
 
