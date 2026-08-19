@@ -13,7 +13,7 @@ use ni_proto::ni::v1::SubmitReplayRequest;
 use prost::Message as _;
 
 fn main() {
-    for target in [1024usize, 1024 * 1024] {
+    for target in [1024usize, 1024 * 10, 1024 * 128, 1024 * 512, 1024 * 1024] {
         let message = SubmitReplayRequest {
             replay: Some(replay_of_at_least(target)),
         };

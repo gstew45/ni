@@ -106,6 +106,8 @@ async fn run(cli: &Cli, transports: &[Transport]) -> Result<Vec<Summary>> {
     // Built once, outside the timing loops, and reused for every transport.
     // Two transports measuring two different payloads would measure nothing.
     let small_replay = replay_of_at_least(1_024);
+    let small_mid_replay = replay_of_at_least(1024 * 10);
+    let mid_replay = replay_of_at_least(1024 * 128);
     let large_replay = replay_of_at_least(1_024 * 1_024);
 
     let mut rows = Vec::new();
@@ -154,6 +156,26 @@ async fn run(cli: &Cli, transports: &[Transport]) -> Result<Vec<Summary>> {
                 cli,
                 &small_replay,
                 "SubmitReplay 1KiB",
+            )
+            .await?,
+        );
+        rows.push(
+            measure_replay(
+                &mut bot,
+                *transport,
+                cli,
+                &small_mid_replay,
+                "SubmitReplay 10KiB",
+            )
+            .await?,
+        );
+        rows.push(
+            measure_replay(
+                &mut bot,
+                *transport,
+                cli,
+                &mid_replay,
+                "SubmitReplay 128KiB",
             )
             .await?,
         );
